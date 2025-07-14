@@ -221,6 +221,7 @@ def train_from_scratch(train_dir, val_dir=None, epochs=30, batch_size=64, lr=0.0
 # 2. Batch Folder Classification to CSV
 # ----------------------
 def classify_folder_to_csv(model_path, folder_path, output_csv='results.csv'):
+    from tqdm import tqdm
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # Resolve paths
     model_path = resolve_path(model_path)
@@ -241,7 +242,7 @@ def classify_folder_to_csv(model_path, folder_path, output_csv='results.csv'):
         for img_file in files:
             if img_file.lower().endswith(('.png', '.jpg', '.jpeg')):
                 image_files.append(os.path.join(root, img_file))
-    for img_path in sorted(image_files):
+    for img_path in tqdm(sorted(image_files), desc='Classifying images'):
         img = cv2.imread(img_path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = cv2.resize(img, (64, 64))
