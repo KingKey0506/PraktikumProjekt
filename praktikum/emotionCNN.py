@@ -287,11 +287,16 @@ def overlay_saliency_on_frame(model, frame, device):
     output[0, pred_idx].backward()
     saliency = input_tensor.grad.abs().squeeze().cpu().numpy()
     saliency = np.max(saliency, axis=0)
+    # Apply Gaussian blur for smoothness
+    saliency = cv2.GaussianBlur(saliency, (11, 11), 0)
+    # Normalize to 0-255
     saliency = (saliency - saliency.min()) / (saliency.max() - saliency.min() + 1e-8)
+    saliency = np.uint8(255 * saliency)
     saliency = cv2.resize(saliency, (overlay_base.shape[1], overlay_base.shape[0]))
-    # Overlay
-    heatmap = cv2.applyColorMap(np.uint8(255 * saliency), cv2.COLORMAP_JET)
-    overlay = cv2.addWeighted(overlay_base, 0.6, heatmap, 0.4, 0)
+    # Apply colormap
+    heatmap = cv2.applyColorMap(saliency, cv2.COLORMAP_JET)
+    # Overlay: more weight to original image, less to heatmap
+    overlay = cv2.addWeighted(overlay_base, 0.7, heatmap, 0.3, 0)
     return overlay, pred_idx, max_prob
 
 def process_video(model_path, video_path, output_path='output_video.avi'):
