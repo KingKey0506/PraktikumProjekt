@@ -7,36 +7,34 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
-from tqdm import tqdm
+from tqdm import tqdm #progress/loading bars
 import pandas as pd
 import matplotlib.pyplot as plt
-from skimage.transform import resize
-import dlib
+#from skimage.transform import resize
+#import dlib
 from collections import deque, Counter
 
-# Emotion labels
-EMOTIONS = ['happy', 'surprise', 'sad', 'angry', 'disgust', 'fear']
-EMOTION_TO_IDX = {emotion: idx for idx, emotion in enumerate(EMOTIONS)}
-IDX_TO_EMOTION = {idx: emotion for emotion, idx in EMOTION_TO_IDX.items()}
+# Emotion labels -- emotionto index and vice versa
+emotions = ['happy', 'surprise', 'sad', 'angry', 'disgust', 'fear']
+EmotionToIndex = {emotion: idx for idx, emotion in enumerate(emotions)}
+IndexToEmotion = {idx: emotion for emotion, idx in EmotionToIndex.items()}
 
 def resolve_path(path):
-    """Resolve relative paths to absolute paths"""
-    import os
+    #Resolve relative paths to absolute paths
     if os.path.isabs(path):
         return path
     else:
-        # Get the directory where this script is located
+        
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        # Resolve relative to script directory
         resolved_path = os.path.join(script_dir, path)
         return os.path.normpath(resolved_path)
 
-# ----------------------
-# 1. Custom CNN (from scratch)
-# ----------------------
-class SimpleEmotionCNN(nn.Module):
-    def __init__(self, num_classes=6):
-        super(SimpleEmotionCNN, self).__init__()
+
+# Custom CNN
+
+class EmotionDetectionCNN(nn.Module):
+    def __init__(self, EmotionAnzahl=6):
+        super(EmotionDetectionCNN, self).__init__()
         self.features = nn.Sequential(
             nn.Conv2d(3, 32, kernel_size=3, padding=1),
             nn.BatchNorm2d(32),
@@ -56,92 +54,87 @@ class SimpleEmotionCNN(nn.Module):
             nn.Linear(128 * 8 * 8, 256),
             nn.ReLU(),
             nn.Dropout(0.5),
-            nn.Linear(256, num_classes)
+            nn.Linear(256, EmotionAnzahl)
         )
     def forward(self, x):
         x = self.features(x)
         x = self.classifier(x)
-        return x
+        return x # end of first prediction
 
-# ----------------------
-# Dataset (reuse from main.py, simplified)
-# ----------------------
-class FacialImageDataset(Dataset):
-    def __init__(self, data_dir, transform=None, cache=True):
-        self.data_dir = data_dir
+class FaceEmotionDataset(Dataset):
+    def __init__(self, DataFolder, transform=None, cache=True):
+        self.DataFolder = DataFolder
         self.transform = transform
         self.cache = cache
+  # set where to save the processed images and their emotions
+        self.CacheDataPath = os.path.join(DataFolder, 'cached_data.npy')
+        self.CacheEmotionsPath = os.path.join(DataFolder, 'cached_labels.npy')
         
-        # Cache file paths
-        self.cache_data_path = os.path.join(data_dir, 'cached_data.npy')
-        self.cache_labels_path = os.path.join(data_dir, 'cached_labels.npy')
-        
-        if self.cache and os.path.exists(self.cache_data_path) and os.path.exists(self.cache_labels_path):
+        if self.cache and os.path.exists(self.CacheDataPath) and os.path.exists(self.CacheEmotionsPath):
             # Load cached data
-            print(f"Loading cached data from {data_dir}...")
-            self.data = np.load(self.cache_data_path)
-            self.labels = np.load(self.cache_labels_path)
+            print(f"Loading cached data from {DataFolder}...")
+            self.data = np.load(self.CacheDataPath)
+            self.labels = np.load(self.CacheEmotionsPath)
             print(f"Loaded {len(self.data)} cached samples")
-        else:
-            # Process and cache data
-            print(f"Processing and caching data from {data_dir}...")
+        else:  #manual caching
+            
+            print(f"Processing and caching data from {DataFolder}...")
             self.data = []
             self.labels = []
             
-            for emotion in EMOTIONS:
-                emotion_dir = os.path.join(data_dir, emotion)
-                if not os.path.exists(emotion_dir):
-                    print(f"Warning: {emotion_dir} not found, skipping...")
+            for emotion in emotions:
+                EmotionDirectory = os.path.join(DataFolder, emotion)
+                if not os.path.exists(EmotionDirectory): # Could be a spelling mistake or wrong data set location etc.
+                    print(f"Warning: {EmotionDirectory} not found, skipping")
                     continue
                 
                 print(f"Processing {emotion} images...")
-                img_files = [f for f in os.listdir(emotion_dir) 
+                ImageFiles = [f for f in os.listdir(EmotionDirectory) 
                            if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
                 
-                for img_file in tqdm(img_files, desc=f"Loading {emotion}"):
-                    img_path = os.path.join(emotion_dir, img_file)
+                for ImageFile in tqdm(ImageFiles, desc=f"Loading {emotion}"):
+                    ImagePath = os.path.join(EmotionDirectory, ImageFile)
                     try:
-                        img = cv2.imread(img_path)
-                        if img is None:
+                        Image= cv2.imread(ImagePath) #if image is unreadable
+                        if Imageis None:
                             continue
-                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                        img = cv2.resize(img, (64, 64))
-                        img = img.astype(np.float32) / 255.0
-                        img = np.transpose(img, (2, 0, 1))  # (H, W, C) -> (C, H, W)
+                        Image= cv2.cvtColor(Image, cv2.COLOR_BGR2RGB)
+                        Image= cv2.resize(Image, (64, 64)) # gegeben
+                        Image= Image.astype(np.float32) / 255.0 # 0.0-1.0
+                        Image= np.transpose(Image, (2, 0, 1))  # rearranges the shape of the image HWC -> CHW (PyTorch format)
                         
-                        self.data.append(img)
-                        self.labels.append(EMOTION_TO_IDX[emotion])
+                        self.data.append(Image)
+                        self.labels.append(EmotionToIndex[emotion])
                     except Exception as e:
-                        print(f"Error processing {img_path}: {e}")
+                        print(f"Error processing {ImagePath}: {e}")
                         continue
             
-            # Convert to numpy arrays
             self.data = np.array(self.data)
             self.labels = np.array(self.labels)
             
-            # Save cache
+        # no need to reload next time   
             if self.cache:
-                np.save(self.cache_data_path, self.data)
-                np.save(self.cache_labels_path, self.labels)
-                print(f"Cached {len(self.data)} samples to {self.cache_data_path}")
+                np.save(self.CacheDataPath, self.data)
+                np.save(self.CacheEmotionsPath, self.labels)
+                print(f"Cached {len(self.data)} samples to {self.CacheDataPath}")
     
-    def __len__(self):
+    def __len__(self): #how many items
         return len(self.data)
     
-    def __getitem__(self, idx):
-        img = self.data[idx]
+    def __getitem__(self, idx): #how to get one specific image and its label
+        Image= self.data[idx]
         label = self.labels[idx]
         
         if self.transform:
-            # Convert back to (H, W, C) for transforms
-            img = np.transpose(img, (1, 2, 0))
-            img = (img * 255).astype(np.uint8)
-            img = self.transform(img)
+            
+            Image= np.transpose(Image, (1, 2, 0)) # Convert back to HWC for transforms
+            Image= (Image* 255).astype(np.uint8) # original scale
+            Image= self.transform(Image)
         else:
             # Convert to tensor
-            img = torch.FloatTensor(img)
+            Image= torch.FloatTensor(Image)
         
-        return img, label
+        return Image, label
 
 # ----------------------
 # 1. Training from scratch
@@ -169,24 +162,24 @@ def train_from_scratch(train_dir, val_dir=None, epochs=30, batch_size=64, lr=0.0
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
-    train_dataset = FacialImageDataset(train_dir, transform=transform)
+    train_dataset = FaceEmotionDataset(train_dir, transform=transform)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     if val_dir:
-        val_dataset = FacialImageDataset(val_dir, transform=transform)
+        val_dataset = FaceEmotionDataset(val_dir, transform=transform)
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     else:
         val_loader = None
-    model = SimpleEmotionCNN(num_classes=6).to(device)
+    model = EmotionDetectionCNN(EmotionAnzahl=6).to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = nn.CrossEntropyLoss()
     best_acc = 0
     for epoch in range(epochs):
         model.train()
         total_loss, correct, total = 0, 0, 0
-        for imgs, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
-            imgs, labels = imgs.to(device), labels.to(device)
+        for Images, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
+            Images, labels = Images.to(device), labels.to(device)
             optimizer.zero_grad()
-            outputs = model(imgs)
+            outputs = model(Images)
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
@@ -200,9 +193,9 @@ def train_from_scratch(train_dir, val_dir=None, epochs=30, batch_size=64, lr=0.0
             model.eval()
             val_correct, val_total = 0, 0
             with torch.no_grad():
-                for imgs, labels in val_loader:
-                    imgs, labels = imgs.to(device), labels.to(device)
-                    outputs = model(imgs)
+                for Images, labels in val_loader:
+                    Images, labels = Images.to(device), labels.to(device)
+                    outputs = model(Images)
                     _, preds = torch.max(outputs, 1)
                     val_correct += (preds == labels).sum().item()
                     val_total += labels.size(0)
@@ -228,7 +221,7 @@ def classify_folder_to_csv(model_path, folder_path, output_csv='results.csv'):
     folder_path = resolve_path(folder_path)
     print(f"Loading model from: {model_path}")
     print(f"Classifying images in: {folder_path}")
-    model = SimpleEmotionCNN(num_classes=6).to(device)
+    model = EmotionDetectionCNN(EmotionAnzahl=6).to(device)
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
     transform = transforms.Compose([
@@ -239,26 +232,26 @@ def classify_folder_to_csv(model_path, folder_path, output_csv='results.csv'):
     # Recursively find all image files
     image_files = []
     for root, _, files in os.walk(folder_path):
-        for img_file in files:
-            if img_file.lower().endswith(('.png', '.jpg', '.jpeg')):
-                image_files.append(os.path.join(root, img_file))
-    for img_path in tqdm(sorted(image_files), desc='Classifying images'):
-        img = cv2.imread(img_path)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img = cv2.resize(img, (64, 64))
-        img_tensor = transform(img).unsqueeze(0).to(device)
+        for ImageFile in files:
+            if ImageFile.lower().endswith(('.png', '.jpg', '.jpeg')):
+                image_files.append(os.path.join(root, ImageFile))
+    for ImagePath in tqdm(sorted(image_files), desc='Classifying images'):
+        Image= cv2.imread(ImagePath)
+        Image= cv2.cvtColor(Image, cv2.COLOR_BGR2RGB)
+        Image= cv2.resize(Image, (64, 64))
+        Image_tensor = transform(Image).unsqueeze(0).to(device)
         with torch.no_grad():
-            output = model(img_tensor)
+            output = model(Image_tensor)
             probs = F.softmax(output, dim=1).cpu().numpy()[0]
         # Build row: filepath (with leading /), then probabilities as strings with two decimals
-        rel_path = os.path.relpath(img_path, start=os.getcwd())
+        rel_path = os.path.relpath(ImagePath, start=os.getcwd())
         rel_path = '/' + rel_path.replace('\\', '/').replace('\\', '/')
         row = {'filepath': rel_path}
-        for i, emotion in enumerate(EMOTIONS):
+        for i, emotion in enumerate(emotions):
             row[emotion] = f"{probs[i]:.2f}"
         results.append(row)
     # Ensure columns order
-    columns = ['filepath'] + EMOTIONS
+    columns = ['filepath'] + emotions
     df = pd.DataFrame(results, columns=columns)
     df.to_csv(output_csv, index=False)
     print(f"Results saved to {output_csv}")
@@ -268,14 +261,14 @@ def classify_folder_to_csv(model_path, folder_path, output_csv='results.csv'):
 # ----------------------
 def overlay_saliency_on_frame(model, frame, device):
     # Use the full frame for prediction (no mouth crop)
-    img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    img_resized = cv2.resize(img, (64, 64))
+    Image= cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    Image_resized = cv2.resize(Image, (64, 64))
     overlay_base = frame
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
-    input_tensor = transform(img_resized).unsqueeze(0).to(device)
+    input_tensor = transform(Image_resized).unsqueeze(0).to(device)
     input_tensor.requires_grad_()
     # Forward
     output = model(input_tensor)
@@ -302,7 +295,7 @@ def overlay_saliency_on_frame(model, frame, device):
 def process_video(model_path, video_path, output_path='output_video.avi'):
     from tqdm import tqdm
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = SimpleEmotionCNN(num_classes=6).to(device)
+    model = EmotionDetectionCNN(EmotionAnzahl=6).to(device)
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
     cap = cv2.VideoCapture(video_path)
@@ -330,7 +323,7 @@ def process_video(model_path, video_path, output_path='output_video.avi'):
             if avg_conf < neutral_threshold:
                 label = 'neutral'
             else:
-                label = IDX_TO_EMOTION[most_common_pred]
+                label = IndexToEmotion[most_common_pred]
         else:
             label = 'neutral'
         cv2.putText(overlay, f'Prediction: {label}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
@@ -350,7 +343,7 @@ def process_video(model_path, video_path, output_path='output_video.avi'):
 # ----------------------
 def webcam_demo(model_path):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = SimpleEmotionCNN(num_classes=6).to(device)
+    model = EmotionDetectionCNN(EmotionAnzahl=6).to(device)
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
     cap = cv2.VideoCapture(0)
@@ -360,7 +353,7 @@ def webcam_demo(model_path):
         if not ret:
             break
         overlay, pred_idx = overlay_saliency_on_frame(model, frame, device)
-        label = IDX_TO_EMOTION[pred_idx]
+        label = IndexToEmotion[pred_idx]
         cv2.putText(overlay, f'Prediction: {label}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
         cv2.imshow('Webcam Emotion Recognition', overlay)
         if cv2.waitKey(1) & 0xFF == ord('q'):
