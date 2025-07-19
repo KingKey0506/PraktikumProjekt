@@ -139,7 +139,7 @@ class FaceEmotionDataset(Dataset):
 # ----------------------
 # 1. Training from scratch
 # ----------------------
-def train_from_scratch(train_dir, val_dir=None, epochs=30, batch_size=64, lr=0.001, save_path='emotion_cnn_scratch.pth'):
+def TrainFromScratch(train_dir, val_dir=None, epochs=30, batch_size=64, lr=0.001, save_path='emotion_cnn_scratch.pth'):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
@@ -213,16 +213,16 @@ def train_from_scratch(train_dir, val_dir=None, epochs=30, batch_size=64, lr=0.0
 # ----------------------
 # 2. Batch Folder Classification to CSV
 # ----------------------
-def classify_folder_to_csv(model_path, folder_path, output_csv='results.csv'):
+def predictToCSV(ModelPath, FolderPath, output_CSV='results.csv'):
     from tqdm import tqdm
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # Resolve paths
-    model_path = resolve_path(model_path)
-    folder_path = resolve_path(folder_path)
-    print(f"Loading model from: {model_path}")
-    print(f"Classifying images in: {folder_path}")
+    ModelPath = resolve_path(ModelPath)
+    FolderPath = resolve_path(FolderPath)
+    print(f"Loading model from: {ModelPath}")
+    print(f"Classifying images in: {FolderPath}")
     model = EmotionDetectionCNN(EmotionAnzahl=6).to(device)
-    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.load_state_dict(torch.load(ModelPath, map_location=device))
     model.eval()
     transform = transforms.Compose([
         transforms.ToTensor(),
@@ -231,7 +231,7 @@ def classify_folder_to_csv(model_path, folder_path, output_csv='results.csv'):
     results = []
     # Recursively find all image files
     image_files = []
-    for root, _, files in os.walk(folder_path):
+    for root, _, files in os.walk(FolderPath):
         for ImageFile in files:
             if ImageFile.lower().endswith(('.png', '.jpg', '.jpeg')):
                 image_files.append(os.path.join(root, ImageFile))
@@ -253,8 +253,8 @@ def classify_folder_to_csv(model_path, folder_path, output_csv='results.csv'):
     # Ensure columns order
     columns = ['filepath'] + emotions
     df = pd.DataFrame(results, columns=columns)
-    df.to_csv(output_csv, index=False)
-    print(f"Results saved to {output_csv}")
+    df.to_csv(output_CSV, index=False)
+    print(f"Results saved to {output_CSV}")
 
 # ----------------------
 # 3. Video Demo (classify each frame, overlay saliency, save video)
@@ -292,13 +292,13 @@ def overlay_saliency_on_frame(model, frame, device):
     overlay = cv2.addWeighted(overlay_base, 0.7, heatmap, 0.3, 0)
     return overlay, pred_idx, max_prob
 
-def process_video(model_path, video_path, output_path='output_video.avi'):
+def ProcessVideo(ModelPath, VideoPath, OutputPath='output_video.avi'):
     from tqdm import tqdm
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = EmotionDetectionCNN(EmotionAnzahl=6).to(device)
-    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.load_state_dict(torch.load(ModelPath, map_location=device))
     model.eval()
-    cap = cv2.VideoCapture(video_path)
+    cap = cv2.VideoCapture(VideoPath)
     fourcc = cv2.VideoWriter_fourcc(*'XVID')
     out = None
     frame_count = 0
@@ -328,7 +328,7 @@ def process_video(model_path, video_path, output_path='output_video.avi'):
             label = 'neutral'
         cv2.putText(overlay, f'Prediction: {label}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
         if out is None:
-            out = cv2.VideoWriter(output_path, fourcc, cap.get(cv2.CAP_PROP_FPS), (frame.shape[1], frame.shape[0]))
+            out = cv2.VideoWriter(OutputPath, fourcc, cap.get(cv2.CAP_PROP_FPS), (frame.shape[1], frame.shape[0]))
         out.write(overlay)
         frame_count += 1
         pbar.update(1)
@@ -336,15 +336,15 @@ def process_video(model_path, video_path, output_path='output_video.avi'):
     if out:
         out.release()
     pbar.close()
-    print(f"Processed {frame_count} frames. Output saved to {output_path}")
+    print(f"Processed {frame_count} frames. Output saved to {OutputPath}")
 
 # ----------------------
 # 4. Webcam Demo (real-time)
 # ----------------------
-def webcam_demo(model_path):
+def WebcamDemo(ModelPath):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = EmotionDetectionCNN(EmotionAnzahl=6).to(device)
-    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.load_state_dict(torch.load(ModelPath, map_location=device))
     model.eval()
     cap = cv2.VideoCapture(0)
     print("Press 'q' to quit.")
@@ -360,21 +360,21 @@ def webcam_demo(model_path):
             break
     cap.release()
     cv2.destroyAllWindows()
+#----------------------------------------------------------------------
+# start of implementing interactive mode
 
-# ----------------------
-# CLI Entrypoints
-# ----------------------
-if __name__ == '__main__':
+if __name__ == '__main__': # only when executed directly not through import
     import argparse
     import sys
+   # default paths (examples for user)
+    defaultModelSavePath = 'C:/Users/keysc/Desktop/EmotionCNN/emotion_model.pth'
+    defaultTrainingImagesDir = 'C:/Users/keysc/Desktop/EmotionCNN/archive/train'
+    defaultTestImagesDirectory = 'C:/Users/keysc/Desktop/EmotionCNN/archive/test'
+ 
     
-    MODEL_PATH_DEFAULT = 'C:/Users/keysc/Desktop/EmotionCNN/emotion_model.pth'
-    TRAIN_DIR_DEFAULT = 'C:/Users/keysc/Desktop/EmotionCNN/archive/train'
-    TEST_DIR_DEFAULT = 'C:/Users/keysc/Desktop/EmotionCNN/archive/test'
-    
-    # Check if running in IDE (interactive mode) or command line
-    if len(sys.argv) == 1:
-        # Interactive mode for IDE
+    if len(sys.argv) == 1: # check if running on an IDE
+
+        # if yes....
         print("=" * 60)
         print("EMOTION CNN - INTERACTIVE MENU")
         print("=" * 60)
@@ -387,31 +387,36 @@ if __name__ == '__main__':
         
         while True:
             try:
-                choice = input("Enter your choice (1-5): ").strip()
+                UserInput = input("Enter your User Input (1-5): ").strip()
                 
-                if choice == '1':
+                if UserInput == '1':
                     print("\n=== TRAINING MODEL ===")
-                    train_dir = input(f"Training directory (default: {TRAIN_DIR_DEFAULT}): ").strip()
+                    # input your own training directory like in the example given
+                    train_dir = input(f"Training directory (default: {defaultTrainingImagesDir}): ").strip() 
                     if not train_dir:
-                        train_dir = TRAIN_DIR_DEFAULT
+                        train_dir = defaultTrainingImagesDir
                     
-                    val_dir = input(f"Validation directory (default: {TEST_DIR_DEFAULT}): ").strip()
+                    val_dir = input(f"Validation directory (default: {defaultTestImagesDirectory}): ").strip()
                     if not val_dir:
-                        val_dir = TEST_DIR_DEFAULT
+                        val_dir = defaultTestImagesDirectory
                     
+                    # Je größer die Anzahl an Epochen, desto höher die "accuracy"
                     epochs = input("Number of epochs (default: 30): ").strip()
                     epochs = int(epochs) if epochs else 30
                     
-                    batch_size = input("Batch size (default: 64): ").strip()
+                    batch_size = input("Batch size (default: 64): ").strip() # process images in groups of 64
+                   
                     batch_size = int(batch_size) if batch_size else 64
                     
-                    lr = input("Learning rate (default: 0.001): ").strip()
+                    lr = input("Learning rate (default: 0.001): ").strip() # smaller lr for smaller adjustment of weights in response to error
                     lr = float(lr) if lr else 0.001
-                    
-                    save_path = input(f"Model save path (default: {MODEL_PATH_DEFAULT}): ").strip()
+
+                    # where should the model be saved? Create new file before executing 
+                    save_path = input(f"Model save path (default: {defaultModelSavePath}): ").strip() 
                     if not save_path:
-                        save_path = MODEL_PATH_DEFAULT
-                    
+                        save_path = defaultModelSavePath
+
+                    # summarize the data the user passed
                     print(f"\nStarting training with:")
                     print(f"Train dir: {train_dir}")
                     print(f"Val dir: {val_dir}")
@@ -419,49 +424,51 @@ if __name__ == '__main__':
                     print(f"Batch size: {batch_size}")
                     print(f"Learning rate: {lr}")
                     print(f"Save path: {save_path}")
+
+                    #call function from line "142"
+                    TrainFromScratch(train_dir, val_dir, epochs, batch_size, lr, save_path) 
                     
-                    train_from_scratch(train_dir, val_dir, epochs, batch_size, lr, save_path)
-                    
-                elif choice == '2':
+                elif UserInput == '2':
                     print("\n=== BATCH CLASSIFICATION ===")
-                    model_path = input(f"Model path (default: {MODEL_PATH_DEFAULT}): ").strip()
-                    if not model_path:
-                        model_path = MODEL_PATH_DEFAULT
-                    folder_path = input(f"Folder path to classify (default: {TEST_DIR_DEFAULT}): ").strip()
-                    if not folder_path:
-                        folder_path = TEST_DIR_DEFAULT
-                    output_csv = input("Output CSV filename (default: results.csv): ").strip()
-                    if not output_csv:
-                        output_csv = 'results.csv'
+                    ModelPath = input(f"Model path (default: {defaultModelSavePath}): ").strip()
+                    if not ModelPath:
+                        ModelPath = defaultModelSavePath
+                    FolderPath = input(f"Folder path to classify (default: {defaultTestImagesDirectory}): ").strip()
+                    if not FolderPath:
+                        FolderPath = defaultTestImagesDirectory
+                    output_CSV = input("Output CSV filename (default: results.csv): ").strip()
+                    if not output_CSV:
+                        output_CSV = 'results.csv'
                     
-                    classify_folder_to_csv(model_path, folder_path, output_csv)
+                    predictToCSV(ModelPath, FolderPath, output_CSV) # label all images and write the results to a CSV
                     
-                elif choice == '3':
+                elif UserInput == '3':
                     print("\n=== VIDEO PROCESSING ===")
-                    model_path = input(f"Model path (default: {MODEL_PATH_DEFAULT}): ").strip()
-                    if not model_path:
-                        model_path = MODEL_PATH_DEFAULT
-                    video_path = input("Input video path: ").strip()
-                    output_path = input("Output video path (default: output_video.avi): ").strip()
-                    if not output_path:
-                        output_path = 'output_video.avi'
+                    ModelPath = input(f"Model path (default: {defaultModelSavePath}): ").strip()
+                    if not ModelPath:
+                        ModelPath = defaultModelSavePath
+                    VideoPath = input("Input video path: ").strip()
+                    # Where should the processed video with predictions be saved
+                    OutputPath = input("Output video path (default: output_video.avi): ").strip()
+                    if not OutputPath:
+                        OutputPath = 'output_video.avi'
                     
-                    process_video(model_path, video_path, output_path)
+                    ProcessVideo(ModelPath, VideoPath, OutputPath)
                     
-                elif choice == '4':
+                elif UserInput == '4':
                     print("\n=== WEBCAM DEMO ===")
-                    model_path = input(f"Model path (default: {MODEL_PATH_DEFAULT}): ").strip()
-                    if not model_path:
-                        model_path = MODEL_PATH_DEFAULT
+                    ModelPath = input(f"Model path (default: {defaultModelSavePath}): ").strip()
+                    if not ModelPath:
+                        ModelPath = defaultModelSavePath
                     print("Starting webcam demo... Press 'q' to quit.")
-                    webcam_demo(model_path)
+                    WebcamDemo(ModelPath)
                     
-                elif choice == '5':
+                elif UserInput == '5':
                     print("Exiting...")
                     break
                     
                 else:
-                    print("Invalid choice. Please enter 1-5.")
+                    print("Invalid UserInput. Please enter 1-5.") # start from the beginning because of mistake in user input
                     
                 print("\n" + "=" * 60)
                 print("1. Train model from scratch")
@@ -474,48 +481,49 @@ if __name__ == '__main__':
             except KeyboardInterrupt:
                 print("\nExiting...")
                 break
+                # Catch and display any unexpected error
             except Exception as e:
                 print(f"Error: {e}")
                 print("Please try again.")
     
     else:
-        # Command line mode
+        
         parser = argparse.ArgumentParser(description='Emotion CNN - Train, Batch Classify, Video Demo, Webcam Demo')
         subparsers = parser.add_subparsers(dest='command')
 
         # Train
         train_parser = subparsers.add_parser('train', help='Train model from scratch')
-        train_parser.add_argument('--train_dir', default=TRAIN_DIR_DEFAULT)
-        train_parser.add_argument('--val_dir', default=TEST_DIR_DEFAULT)
+        train_parser.add_argument('--train_dir', default=defaultTrainingImagesDir)
+        train_parser.add_argument('--val_dir', default=defaultTestImagesDirectory)
         train_parser.add_argument('--epochs', type=int, default=30)
         train_parser.add_argument('--batch_size', type=int, default=64)
         train_parser.add_argument('--lr', type=float, default=0.001)
-        train_parser.add_argument('--save_path', default=MODEL_PATH_DEFAULT)
+        train_parser.add_argument('--save_path', default=defaultModelSavePath)
 
-        # Batch classify
+        # for Batch classification
         classify_parser = subparsers.add_parser('classify', help='Batch classify images in a folder and output CSV')
-        classify_parser.add_argument('--model_path', default=MODEL_PATH_DEFAULT)
-        classify_parser.add_argument('--folder_path', default=TEST_DIR_DEFAULT)
-        classify_parser.add_argument('--output_csv', default='results.csv')
+        classify_parser.add_argument('--ModelPath', default=defaultModelSavePath)
+        classify_parser.add_argument('--FolderPath', default=defaultTestImagesDirectory)
+        classify_parser.add_argument('--output_CSV', default='results.csv')
 
-        # Video demo
+        # for Video demo
         video_parser = subparsers.add_parser('video', help='Process a video, classify, overlay saliency, save video')
-        video_parser.add_argument('--model_path', default=MODEL_PATH_DEFAULT, required=False)
-        video_parser.add_argument('--video_path', required=True)
-        video_parser.add_argument('--output_path', default='output_video.avi')
+        video_parser.add_argument('--ModelPath', default=defaultModelSavePath, required=False)
+        video_parser.add_argument('--VideoPath', required=True)
+        video_parser.add_argument('--OutputPath', default='output_video.avi')
 
-        # Webcam demo
+        # for Webcam demo
         webcam_parser = subparsers.add_parser('webcam', help='Webcam real-time demo')
-        webcam_parser.add_argument('--model_path', default=MODEL_PATH_DEFAULT, required=False)
+        webcam_parser.add_argument('--ModelPath', default=defaultModelSavePath, required=False)
 
         args = parser.parse_args()
         if args.command == 'train':
-            train_from_scratch(args.train_dir, args.val_dir, args.epochs, args.batch_size, args.lr, args.save_path)
+            TrainFromScratch(args.train_dir, args.val_dir, args.epochs, args.batch_size, args.lr, args.save_path)
         elif args.command == 'classify':
-            classify_folder_to_csv(args.model_path, args.folder_path, args.output_csv)
+            predictToCSV(args.ModelPath, args.FolderPath, args.output_CSV)
         elif args.command == 'video':
-            process_video(args.model_path, args.video_path, args.output_path)
+            ProcessVideo(args.ModelPath, args.VideoPath, args.OutputPath)
         elif args.command == 'webcam':
-            webcam_demo(args.model_path)
+            WebcamDemo(args.ModelPath)
         else:
             parser.print_help() 
