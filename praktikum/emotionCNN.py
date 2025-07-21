@@ -96,7 +96,7 @@ class FaceEmotionDataset(Dataset):
                     ImagePath = os.path.join(EmotionDirectory, ImageFile)
                     try:
                         Image= cv2.imread(ImagePath) #if image is unreadable
-                        if Imageis None:
+                        if Image is None:
                             continue
                         Image= cv2.cvtColor(Image, cv2.COLOR_BGR2RGB)
                         Image= cv2.resize(Image, (64, 64)) # gegeben
