@@ -136,7 +136,7 @@ class FaceEmotionDataset(Dataset):
         
         return Image, label
 
-def TrainFromScratch(TrainingDirectory, ValidationDirectory=None, epochs=30, batchSize=64, LearningRate=0.001, savePath='emotion_cnn_scratch.pth'):
+def TrainFromScratch(TrainingDirectory, ValidationDirectory=None, epochs=30, batch_size=64, LearningRate=0.001, savePath='emotion_cnn_scratch.pth'):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') #gpu else CPU 
     print(f"Using device: {device}")
     import os
@@ -157,10 +157,10 @@ def TrainFromScratch(TrainingDirectory, ValidationDirectory=None, epochs=30, bat
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) 
     ])
     TrainDataset = FaceEmotionDataset(TrainingDirectory, transform=transform) # the part where the learning happens
-    TrainDataLoader = DataLoader(TrainDataset, batchSize=batchSize, shuffle=True) # shuffle helps improvment 
+    TrainDataLoader = DataLoader(TrainDataset, batch_size=batch_size, shuffle=True) # shuffle helps improvment 
     if ValidationDirectory:
         ValDataset = FaceEmotionDataset(ValidationDirectory, transform=transform)
-        ValDataloader = DataLoader(ValDataset, batchSize=batchSize, shuffle=False) # hier kein Shuffle 
+        ValDataloader = DataLoader(ValDataset, batch_size=batch_size, shuffle=False) # hier kein Shuffle 
     else:
         ValDataloader = None
     model = EmotionDetectionCNN(EmotionAnzahl=6).to(device) # my model 
@@ -398,9 +398,9 @@ if __name__ == '__main__': # only when executed directly not through import
                     epochs = input("Number of epochs (default: 30): ").strip()
                     epochs = int(epochs) if epochs else 30
                     
-                    batchSize = input("Batch size (default: 64): ").strip() # process images in groups of 64
+                    batch_size = input("Batch size (default: 64): ").strip() # process images in groups of 64
                    
-                    batchSize = int(batchSize) if batchSize else 64
+                    batch_size = int(batch_size) if batch_size else 64
                     
                     LearningRate = input("Learning rate (default: 0.001): ").strip() # smaller LearningRate for smaller adjustment of weights in response to error
                     LearningRate = float(LearningRate) if LearningRate else 0.001
@@ -415,12 +415,12 @@ if __name__ == '__main__': # only when executed directly not through import
                     print(f"Train dir: {TrainingDirectory}")
                     print(f"Val dir: {ValidationDirectory}")
                     print(f"Epochs: {epochs}")
-                    print(f"Batch size: {batchSize}")
+                    print(f"Batch size: {batch_size}")
                     print(f"Learning rate: {LearningRate}")
                     print(f"Save path: {savePath}")
 
                     #call function from line "142"
-                    TrainFromScratch(TrainingDirectory, ValidationDirectory, epochs, batchSize, LearningRate, savePath) 
+                    TrainFromScratch(TrainingDirectory, ValidationDirectory, epochs, batch_size, LearningRate, savePath) 
                     
                 elif UserInput == '2':
                     print("\n=== BATCH CLASSIFICATION ===")
@@ -490,7 +490,7 @@ if __name__ == '__main__': # only when executed directly not through import
         train_parser.add_argument('--TrainingDirectory', default=defaultTrainingImagesDir)
         train_parser.add_argument('--ValidationDirectory', default=defaultTestImagesDirectory)
         train_parser.add_argument('--epochs', type=int, default=30)
-        train_parser.add_argument('--batchSize', type=int, default=64)
+        train_parser.add_argument('--batch_size', type=int, default=64)
         train_parser.add_argument('--LearningRate', type=float, default=0.001)
         train_parser.add_argument('--savePath', default=defaultModelSavePath)
 
@@ -512,7 +512,7 @@ if __name__ == '__main__': # only when executed directly not through import
 
         args = parser.parse_args()
         if args.command == 'train':
-            TrainFromScratch(args.TrainingDirectory, args.ValidationDirectory, args.epochs, args.batchSize, args.LearningRate, args.savePath)
+            TrainFromScratch(args.TrainingDirectory, args.ValidationDirectory, args.epochs, args.batch_size, args.LearningRate, args.savePath)
         elif args.command == 'classify':
             predictToCSV(args.ModelPath, args.FolderPath, args.output_CSV)
         elif args.command == 'video':
