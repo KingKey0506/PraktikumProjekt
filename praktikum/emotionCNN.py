@@ -102,7 +102,6 @@ class FaceEmotionDataset(Dataset):
                         if Image is None:
                             continue
                         Image= cv2.cvtColor(Image, cv2.COLOR_BGR2RGB)
-                        #Image= cv2.cvtColor(Image, cv2.COLOR_BGR2GRAY) # Convert to grayscale
                         Image= cv2.resize(Image, (64, 64)) # gegeben
                         Image= Image.astype(np.float32) / 255.0 # 0.0-1.0
                         Image= np.transpose(Image, (2, 0, 1))  # rearranges the shape of the image HWC -> CHW (PyTorch format)
@@ -208,15 +207,29 @@ def TrainFromScratch(TrainingDirectory, ValidationDirectory=None, epochs=30, bat
     print("Training complete.")
     return model
 
+
 # ----------------------
 # 2. Batch Folder Classification to CSV
-# ----------------------
+# ----------------------      
 def predictToCSV(ModelPath, FolderPath, output_CSV='results.csv', use_data_augmentation=False):
     from tqdm import tqdm
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # Resolve paths
+    ModelPath = ResolvePath(ModelPath)
+    FolderPath = ResolvePath(FolderPath)
+    print(f"Loading model from: {ModelPath}")
+    print(f"Classifying images in: {FolderPath}")
+    model = EmotionDetectionCNN(EmotionAnzahl=6).to(device)
+    model.load_state_dict(torch.load(ModelPath, map_location=device))
+    model.eval() #to make sure it's as consestiant as possible 
+    ModelPath = ResolvePath(ModelPath)
+    FolderPath = ResolvePath(FolderPath)
+    print(f"Loading model from: {ModelPath}")
+    print(f"Classifying images in: {FolderPath}")
+    model = EmotionDetectionCNN(EmotionAnzahl=6).to(device)
+    model.load_state_dict(torch.load(ModelPath, map_location=device))
+    model.eval()
     if use_data_augmentation == True:
-        transform = transforms.Compose([
+        transforms = transforms.Compose([
         transforms.RandomResizedCrop(48, scale=(0.8, 1.0)),
         transforms.RandomHorizontalFlip(),
         transforms.RandomRotation(15),
@@ -224,42 +237,32 @@ def predictToCSV(ModelPath, FolderPath, output_CSV='results.csv', use_data_augme
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     else:
-        transform = transforms.Compose([
-            transforms.Resize((64, 64)),
+        transforms = transforms.Compose([
+            transforms.Resize(48),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
-        ModelPath = ResolvePath(ModelPath)
-        FolderPath = ResolvePath(FolderPath)
-        print(f"Loading model from: {ModelPath}")
-        print(f"Classifying images in: {FolderPath}")
-        model = EmotionDetectionCNN(EmotionAnzahl=6).to(device)
-        model.load_state_dict(torch.load(ModelPath, map_location=device))
-        model.eval()
     results = []
-    # Recursively find all image files
-    image_files = []
+    imageFiles = []
     for root, _, files in os.walk(FolderPath):
         for ImageFile in files:
             if ImageFile.lower().endswith(('.png', '.jpg', '.jpeg')):
-                image_files.append(os.path.join(root, ImageFile))
-    for ImagePath in tqdm(sorted(image_files), desc='Classifying images'):
+                imageFiles.append(os.path.join(root, ImageFile))
+    for ImagePath in tqdm(sorted(imageFiles), desc='Classifying images'):
         Image= cv2.imread(ImagePath)
         Image= cv2.cvtColor(Image, cv2.COLOR_BGR2RGB)  # Convert to RGB
-        #Image= cv2.cvtColor(Image, cv2.COLOR_BGR2GRAY)  # Convert to grayscale
         Image= cv2.resize(Image, (64, 64))
-        Image_tensor = transform(Image).unsqueeze(0).to(device)
+        ImageTensor = transforms(Image).unsqueeze(0).to(device)
         with torch.no_grad():
-            output = model(Image_tensor)
-            probs = F.softmax(output, dim=1).cpu().numpy()[0]
-        # Build row: filepath (with leading /), then probabilities as strings with two decimals
-        rel_path = os.path.relpath(ImagePath, start=os.getcwd())
-        rel_path = '/' + rel_path.replace('\\', '/').replace('\\', '/')
-        row = {'filepath': rel_path}
+            output = model(ImageTensor)
+            probs = F.softmax(output, dim=1).cpu().numpy()[0] #softmax for probablities
+    
+        relativePath = os.path.relpath(ImagePath, start=os.getcwd()) # path to current directory
+        relativePath = '/' + relativePath.replace('\\', '/').replace('\\', '/')
+        row = {'filepath': relativePath}
         for i, emotion in enumerate(emotions):
             row[emotion] = f"{probs[i]:.2f}"
         results.append(row)
-    # Ensure columns order
     columns = ['filepath'] + emotions
     df = pd.DataFrame(results, columns=columns)
     df.to_csv(output_CSV, index=False)
@@ -270,8 +273,8 @@ def predictToCSV(ModelPath, FolderPath, output_CSV='results.csv', use_data_augme
 # ----------------------
 def overlay_saliency_on_frame(model, frame, device):
     # Use the full frame for prediction (no mouth crop)
-    #Image= cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    Image= cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)  # Convert to grayscale
+    
+    Image= cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     Image_resized = cv2.resize(Image, (64, 64))
     overlay_base = frame
     transform = transforms.Compose([
