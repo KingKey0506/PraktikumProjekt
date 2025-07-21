@@ -136,7 +136,7 @@ class FaceEmotionDataset(Dataset):
         
         return Image, label
 
-def TrainFromScratch(TrainingDirectory, ValidationDirectory=None, epochs=30, batch_size=64, LearningRate=0.001, savePath='emotion_cnn_scratch.pth'):
+def TrainFromScratch(TrainingDirectory, ValidationDirectory=None, epochs=30, batch_size=64, lr=0.001, savePath='emotion_cnn_scratch.pth'):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') #gpu else CPU 
     print(f"Using device: {device}")
     import os
@@ -164,7 +164,7 @@ def TrainFromScratch(TrainingDirectory, ValidationDirectory=None, epochs=30, bat
     else:
         ValDataloader = None
     model = EmotionDetectionCNN(EmotionAnzahl=6).to(device) # my model 
-    optimizer = optim.Adam(model.parameters(), LearningRate=LearningRate)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = nn.CrossEntropyLoss()
     bestAccuracy = 0
     for epoch in range(epochs):
@@ -402,8 +402,8 @@ if __name__ == '__main__': # only when executed directly not through import
                    
                     batch_size = int(batch_size) if batch_size else 64
                     
-                    LearningRate = input("Learning rate (default: 0.001): ").strip() # smaller LearningRate for smaller adjustment of weights in response to error
-                    LearningRate = float(LearningRate) if LearningRate else 0.001
+                    lr = input("Learning rate (default: 0.001): ").strip() # smaller lr for smaller adjustment of weights in response to error
+                    lr = float(lr) if lr else 0.001
 
                     # where should the model be saved? Create new file before executing 
                     savePath = input(f"Model save path (default: {defaultModelSavePath}): ").strip() 
@@ -416,11 +416,11 @@ if __name__ == '__main__': # only when executed directly not through import
                     print(f"Val dir: {ValidationDirectory}")
                     print(f"Epochs: {epochs}")
                     print(f"Batch size: {batch_size}")
-                    print(f"Learning rate: {LearningRate}")
+                    print(f"Learning rate: {lr}")
                     print(f"Save path: {savePath}")
 
                     #call function from line "142"
-                    TrainFromScratch(TrainingDirectory, ValidationDirectory, epochs, batch_size, LearningRate, savePath) 
+                    TrainFromScratch(TrainingDirectory, ValidationDirectory, epochs, batch_size, lr, savePath) 
                     
                 elif UserInput == '2':
                     print("\n=== BATCH CLASSIFICATION ===")
@@ -491,7 +491,7 @@ if __name__ == '__main__': # only when executed directly not through import
         train_parser.add_argument('--ValidationDirectory', default=defaultTestImagesDirectory)
         train_parser.add_argument('--epochs', type=int, default=30)
         train_parser.add_argument('--batch_size', type=int, default=64)
-        train_parser.add_argument('--LearningRate', type=float, default=0.001)
+        train_parser.add_argument('--lr', type=float, default=0.001)
         train_parser.add_argument('--savePath', default=defaultModelSavePath)
 
         # for Batch classification
@@ -512,7 +512,7 @@ if __name__ == '__main__': # only when executed directly not through import
 
         args = parser.parse_args()
         if args.command == 'train':
-            TrainFromScratch(args.TrainingDirectory, args.ValidationDirectory, args.epochs, args.batch_size, args.LearningRate, args.savePath)
+            TrainFromScratch(args.TrainingDirectory, args.ValidationDirectory, args.epochs, args.batch_size, args.lr, args.savePath)
         elif args.command == 'classify':
             predictToCSV(args.ModelPath, args.FolderPath, args.output_CSV)
         elif args.command == 'video':
