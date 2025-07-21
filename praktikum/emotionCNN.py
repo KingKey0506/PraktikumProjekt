@@ -204,47 +204,42 @@ def TrainFromScratch(TrainingDirectory, ValidationDirectory=None, epochs=30, bat
     print("Training complete.")
     return model
 
-# ----------------------
-# 2. Batch Folder Classification to CSV
-# ----------------------
+
 def predictToCSV(ModelPath, FolderPath, output_CSV='results.csv'):
     from tqdm import tqdm
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # Resolve paths
     ModelPath = ResolvePath(ModelPath)
     FolderPath = ResolvePath(FolderPath)
     print(f"Loading model from: {ModelPath}")
     print(f"Classifying images in: {FolderPath}")
     model = EmotionDetectionCNN(EmotionAnzahl=6).to(device)
     model.load_state_dict(torch.load(ModelPath, map_location=device))
-    model.eval()
+    model.eval() #to make sure it's as consestiant as possible 
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     results = []
-    # Recursively find all image files
-    image_files = []
+    imageFiles = []
     for root, _, files in os.walk(FolderPath):
         for ImageFile in files:
             if ImageFile.lower().endswith(('.png', '.jpg', '.jpeg')):
-                image_files.append(os.path.join(root, ImageFile))
-    for ImagePath in tqdm(sorted(image_files), desc='Classifying images'):
+                imageFiles.append(os.path.join(root, ImageFile))
+    for ImagePath in tqdm(sorted(imageFiles), desc='Classifying images'):
         Image= cv2.imread(ImagePath)
-        Image= cv2.cvtColor(Image, cv2.COLOR_BGR2RGB)
-        Image= cv2.resize(Image, (64, 64))
-        Image_tensor = transform(Image).unsqueeze(0).to(device)
+        Image= cv2.cvtColor(Image, cv2.COLOR_BGR2RGB) 
+        Image= cv2.resize(Image, (64, 64)) # das sind ein paar Formalitäten 
+        ImageTensor  = transform(Image).unsqueeze(0).to(device)
         with torch.no_grad():
-            output = model(Image_tensor)
-            probs = F.softmax(output, dim=1).cpu().numpy()[0]
-        # Build row: filepath (with leading /), then probabilities as strings with two decimals
-        rel_path = os.path.relpath(ImagePath, start=os.getcwd())
-        rel_path = '/' + rel_path.replace('\\', '/').replace('\\', '/')
-        row = {'filepath': rel_path}
+            output = model(ImageTensor )
+            probs = F.softmax(output, dim=1).cpu().numpy()[0] #softmax for probablities
+    
+        relativePath = os.path.relpath(ImagePath, start=os.getcwd()) # path to current directory
+        relativePath = '/' + relativePath.replace('\\', '/').replace('\\', '/')
+        row = {'filepath': relativePath}
         for i, emotion in enumerate(emotions):
             row[emotion] = f"{probs[i]:.2f}"
         results.append(row)
-    # Ensure columns order
     columns = ['filepath'] + emotions
     df = pd.DataFrame(results, columns=columns)
     df.to_csv(output_CSV, index=False)
