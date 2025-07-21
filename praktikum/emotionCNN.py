@@ -19,7 +19,7 @@ emotions = ['happy', 'surprise', 'sad', 'angry', 'disgust', 'fear']
 EmotionToIndex = {emotion: idx for idx, emotion in enumerate(emotions)}
 IndexToEmotion = {idx: emotion for emotion, idx in EmotionToIndex.items()}
 
-def resolve_path(path):
+def ResolvePath(path):
     #Resolve relative paths to absolute paths
     if os.path.isabs(path):
         return path
@@ -136,77 +136,71 @@ class FaceEmotionDataset(Dataset):
         
         return Image, label
 
-# ----------------------
-# 1. Training from scratch
-# ----------------------
-def TrainFromScratch(train_dir, val_dir=None, epochs=30, batch_size=64, lr=0.001, save_path='emotion_cnn_scratch.pth'):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+def TrainFromScratch(TrainingDirectory, ValidationDirectory=None, epochs=30, batchSize=64, LearningRate=0.001, savePath='emotion_cnn_scratch.pth'):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') #gpu else CPU 
     print(f"Using device: {device}")
-    
-    # Debug: Print current working directory and check if paths exist
     import os
     print(f"Current working directory: {os.getcwd()}")
     
-    # Resolve paths
-    train_dir = resolve_path(train_dir)
-    if val_dir:
-        val_dir = resolve_path(val_dir)
+    TrainingDirectory = ResolvePath(TrainingDirectory) # absolute paths so wie oben
+    if ValidationDirectory:
+        ValidationDirectory = ResolvePath(ValidationDirectory)
     
-    print(f"Training directory: {train_dir}")
-    print(f"Training directory exists: {os.path.exists(train_dir)}")
-    if val_dir:
-        print(f"Validation directory: {val_dir}")
-        print(f"Validation directory exists: {os.path.exists(val_dir)}")
+    print(f"Training directory: {TrainingDirectory}")
+    print(f"Training directory exists: {os.path.exists(TrainingDirectory)}")
+    if ValidationDirectory:
+        print(f"Validation directory: {ValidationDirectory}")
+        print(f"Validation directory exists: {os.path.exists(ValidationDirectory)}")
     
     transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        transforms.ToTensor(), #pytorch tensors ahnlich zu Matrizen 
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) 
     ])
-    train_dataset = FaceEmotionDataset(train_dir, transform=transform)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    if val_dir:
-        val_dataset = FaceEmotionDataset(val_dir, transform=transform)
-        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    TrainDataset = FaceEmotionDataset(TrainingDirectory, transform=transform) # the part where the learning happens
+    TrainDataLoader = DataLoader(TrainDataset, batchSize=batchSize, shuffle=True) # shuffle helps improvment 
+    if ValidationDirectory:
+        ValDataset = FaceEmotionDataset(ValidationDirectory, transform=transform)
+        ValDataloader = DataLoader(ValDataset, batchSize=batchSize, shuffle=False) # hier kein Shuffle 
     else:
-        val_loader = None
-    model = EmotionDetectionCNN(EmotionAnzahl=6).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+        ValDataloader = None
+    model = EmotionDetectionCNN(EmotionAnzahl=6).to(device) # my model 
+    optimizer = optim.Adam(model.parameters(), LearningRate=LearningRate)
     criterion = nn.CrossEntropyLoss()
-    best_acc = 0
+    bestAccuracy = 0
     for epoch in range(epochs):
-        model.train()
-        total_loss, correct, total = 0, 0, 0
-        for Images, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
+        model.train() #training mode 
+        totalLoss, correct, total = 0, 0, 0
+        for Images, labels in tqdm(TrainDataLoader, desc=f"Epoch {epoch+1}/{epochs}"): # loops in batches and gives tqdm
             Images, labels = Images.to(device), labels.to(device)
-            optimizer.zero_grad()
-            outputs = model(Images)
+            optimizer.zero_grad() # gradiant else will build up 
+            outputs = model(Images) # forward pass to send through the cnn Layers 
             loss = criterion(outputs, labels)
             loss.backward()
-            optimizer.step()
-            total_loss += loss.item()
+            optimizer.step() #update weights 
+            totalLoss += loss.item() # gets it from the pytorch tensor
             _, preds = torch.max(outputs, 1)
             correct += (preds == labels).sum().item()
             total += labels.size(0)
-        train_acc = correct / total
-        print(f"Train Loss: {total_loss/len(train_loader):.4f}, Train Acc: {train_acc:.4f}")
-        if val_loader:
-            model.eval()
-            val_correct, val_total = 0, 0
-            with torch.no_grad():
-                for Images, labels in val_loader:
+        trainingAcc = correct / total
+        print(f"Train Loss: {totalLoss/len(TrainDataLoader):.4f}, Train Acc: {trainingAcc:.4f}")
+        if ValDataloader:
+            model.eval() #evaluation mode 
+            valCorrect, valTotal = 0, 0
+            with torch.no_grad(): # dont track because my goal here is not to train 
+                for Images, labels in ValDataloader: # work in batches 
                     Images, labels = Images.to(device), labels.to(device)
                     outputs = model(Images)
                     _, preds = torch.max(outputs, 1)
-                    val_correct += (preds == labels).sum().item()
-                    val_total += labels.size(0)
-            val_acc = val_correct / val_total
-            print(f"Val Acc: {val_acc:.4f}")
-            if val_acc > best_acc:
-                best_acc = val_acc
-                torch.save(model.state_dict(), save_path)
-                print(f"Model saved to {save_path}")
+                    valCorrect += (preds == labels).sum().item()
+                    valTotal += labels.size(0)
+            valAcc = valCorrect / valTotal
+            print(f"Val Acc: {valAcc:.4f}")
+            if valAcc > bestAccuracy:
+                bestAccuracy = valAcc
+                torch.save(model.state_dict(), savePath)
+                print(f"Model saved to {savePath}")
         else:
-            torch.save(model.state_dict(), save_path)
+            torch.save(model.state_dict(), savePath)
     print("Training complete.")
     return model
 
@@ -217,8 +211,8 @@ def predictToCSV(ModelPath, FolderPath, output_CSV='results.csv'):
     from tqdm import tqdm
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # Resolve paths
-    ModelPath = resolve_path(ModelPath)
-    FolderPath = resolve_path(FolderPath)
+    ModelPath = ResolvePath(ModelPath)
+    FolderPath = ResolvePath(FolderPath)
     print(f"Loading model from: {ModelPath}")
     print(f"Classifying images in: {FolderPath}")
     model = EmotionDetectionCNN(EmotionAnzahl=6).to(device)
@@ -392,41 +386,41 @@ if __name__ == '__main__': # only when executed directly not through import
                 if UserInput == '1':
                     print("\n=== TRAINING MODEL ===")
                     # input your own training directory like in the example given
-                    train_dir = input(f"Training directory (default: {defaultTrainingImagesDir}): ").strip() 
-                    if not train_dir:
-                        train_dir = defaultTrainingImagesDir
+                    TrainingDirectory = input(f"Training directory (default: {defaultTrainingImagesDir}): ").strip() 
+                    if not TrainingDirectory:
+                        TrainingDirectory = defaultTrainingImagesDir
                     
-                    val_dir = input(f"Validation directory (default: {defaultTestImagesDirectory}): ").strip()
-                    if not val_dir:
-                        val_dir = defaultTestImagesDirectory
+                    ValidationDirectory = input(f"Validation directory (default: {defaultTestImagesDirectory}): ").strip()
+                    if not ValidationDirectory:
+                        ValidationDirectory = defaultTestImagesDirectory
                     
                     # Je größer die Anzahl an Epochen, desto höher die "accuracy"
                     epochs = input("Number of epochs (default: 30): ").strip()
                     epochs = int(epochs) if epochs else 30
                     
-                    batch_size = input("Batch size (default: 64): ").strip() # process images in groups of 64
+                    batchSize = input("Batch size (default: 64): ").strip() # process images in groups of 64
                    
-                    batch_size = int(batch_size) if batch_size else 64
+                    batchSize = int(batchSize) if batchSize else 64
                     
-                    lr = input("Learning rate (default: 0.001): ").strip() # smaller lr for smaller adjustment of weights in response to error
-                    lr = float(lr) if lr else 0.001
+                    LearningRate = input("Learning rate (default: 0.001): ").strip() # smaller LearningRate for smaller adjustment of weights in response to error
+                    LearningRate = float(LearningRate) if LearningRate else 0.001
 
                     # where should the model be saved? Create new file before executing 
-                    save_path = input(f"Model save path (default: {defaultModelSavePath}): ").strip() 
-                    if not save_path:
-                        save_path = defaultModelSavePath
+                    savePath = input(f"Model save path (default: {defaultModelSavePath}): ").strip() 
+                    if not savePath:
+                        savePath = defaultModelSavePath
 
                     # summarize the data the user passed
                     print(f"\nStarting training with:")
-                    print(f"Train dir: {train_dir}")
-                    print(f"Val dir: {val_dir}")
+                    print(f"Train dir: {TrainingDirectory}")
+                    print(f"Val dir: {ValidationDirectory}")
                     print(f"Epochs: {epochs}")
-                    print(f"Batch size: {batch_size}")
-                    print(f"Learning rate: {lr}")
-                    print(f"Save path: {save_path}")
+                    print(f"Batch size: {batchSize}")
+                    print(f"Learning rate: {LearningRate}")
+                    print(f"Save path: {savePath}")
 
                     #call function from line "142"
-                    TrainFromScratch(train_dir, val_dir, epochs, batch_size, lr, save_path) 
+                    TrainFromScratch(TrainingDirectory, ValidationDirectory, epochs, batchSize, LearningRate, savePath) 
                     
                 elif UserInput == '2':
                     print("\n=== BATCH CLASSIFICATION ===")
@@ -493,12 +487,12 @@ if __name__ == '__main__': # only when executed directly not through import
 
         # Train
         train_parser = subparsers.add_parser('train', help='Train model from scratch')
-        train_parser.add_argument('--train_dir', default=defaultTrainingImagesDir)
-        train_parser.add_argument('--val_dir', default=defaultTestImagesDirectory)
+        train_parser.add_argument('--TrainingDirectory', default=defaultTrainingImagesDir)
+        train_parser.add_argument('--ValidationDirectory', default=defaultTestImagesDirectory)
         train_parser.add_argument('--epochs', type=int, default=30)
-        train_parser.add_argument('--batch_size', type=int, default=64)
-        train_parser.add_argument('--lr', type=float, default=0.001)
-        train_parser.add_argument('--save_path', default=defaultModelSavePath)
+        train_parser.add_argument('--batchSize', type=int, default=64)
+        train_parser.add_argument('--LearningRate', type=float, default=0.001)
+        train_parser.add_argument('--savePath', default=defaultModelSavePath)
 
         # for Batch classification
         classify_parser = subparsers.add_parser('classify', help='Batch classify images in a folder and output CSV')
@@ -518,7 +512,7 @@ if __name__ == '__main__': # only when executed directly not through import
 
         args = parser.parse_args()
         if args.command == 'train':
-            TrainFromScratch(args.train_dir, args.val_dir, args.epochs, args.batch_size, args.lr, args.save_path)
+            TrainFromScratch(args.TrainingDirectory, args.ValidationDirectory, args.epochs, args.batchSize, args.LearningRate, args.savePath)
         elif args.command == 'classify':
             predictToCSV(args.ModelPath, args.FolderPath, args.output_CSV)
         elif args.command == 'video':
