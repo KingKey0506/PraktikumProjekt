@@ -10,10 +10,13 @@ from torchvision import transforms
 from tqdm import tqdm #progress/loading bars
 import pandas as pd
 import matplotlib.pyplot as plt
+import train_cv
 #from skimage.transform import resize
 #import dlib
 from collections import deque, Counter
-
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+import test
 # Emotion labels -- emotionto index and vice versa
 emotions = ['happy', 'surprise', 'sad', 'angry', 'disgust', 'fear']
 EmotionToIndex = {emotion: idx for idx, emotion in enumerate(emotions)}
@@ -99,6 +102,7 @@ class FaceEmotionDataset(Dataset):
                         if Image is None:
                             continue
                         Image= cv2.cvtColor(Image, cv2.COLOR_BGR2RGB)
+                        #Image= cv2.cvtColor(Image, cv2.COLOR_BGR2GRAY) # Convert to grayscale
                         Image= cv2.resize(Image, (64, 64)) # gegeben
                         Image= Image.astype(np.float32) / 255.0 # 0.0-1.0
                         Image= np.transpose(Image, (2, 0, 1))  # rearranges the shape of the image HWC -> CHW (PyTorch format)
@@ -207,21 +211,31 @@ def TrainFromScratch(TrainingDirectory, ValidationDirectory=None, epochs=30, bat
 # ----------------------
 # 2. Batch Folder Classification to CSV
 # ----------------------
-def predictToCSV(ModelPath, FolderPath, output_CSV='results.csv'):
+def predictToCSV(ModelPath, FolderPath, output_CSV='results.csv', use_data_augmentation=False):
     from tqdm import tqdm
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # Resolve paths
-    ModelPath = ResolvePath(ModelPath)
-    FolderPath = ResolvePath(FolderPath)
-    print(f"Loading model from: {ModelPath}")
-    print(f"Classifying images in: {FolderPath}")
-    model = EmotionDetectionCNN(EmotionAnzahl=6).to(device)
-    model.load_state_dict(torch.load(ModelPath, map_location=device))
-    model.eval()
-    transform = transforms.Compose([
+    if use_data_augmentation == True:
+        transform = transforms.Compose([
+        transforms.RandomResizedCrop(48, scale=(0.8, 1.0)),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomRotation(15),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
+    else:
+        transform = transforms.Compose([
+            transforms.Resize((64, 64)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+        ModelPath = ResolvePath(ModelPath)
+        FolderPath = ResolvePath(FolderPath)
+        print(f"Loading model from: {ModelPath}")
+        print(f"Classifying images in: {FolderPath}")
+        model = EmotionDetectionCNN(EmotionAnzahl=6).to(device)
+        model.load_state_dict(torch.load(ModelPath, map_location=device))
+        model.eval()
     results = []
     # Recursively find all image files
     image_files = []
@@ -231,7 +245,8 @@ def predictToCSV(ModelPath, FolderPath, output_CSV='results.csv'):
                 image_files.append(os.path.join(root, ImageFile))
     for ImagePath in tqdm(sorted(image_files), desc='Classifying images'):
         Image= cv2.imread(ImagePath)
-        Image= cv2.cvtColor(Image, cv2.COLOR_BGR2RGB)
+        Image= cv2.cvtColor(Image, cv2.COLOR_BGR2RGB)  # Convert to RGB
+        #Image= cv2.cvtColor(Image, cv2.COLOR_BGR2GRAY)  # Convert to grayscale
         Image= cv2.resize(Image, (64, 64))
         Image_tensor = transform(Image).unsqueeze(0).to(device)
         with torch.no_grad():
@@ -255,7 +270,8 @@ def predictToCSV(ModelPath, FolderPath, output_CSV='results.csv'):
 # ----------------------
 def overlay_saliency_on_frame(model, frame, device):
     # Use the full frame for prediction (no mouth crop)
-    Image= cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    #Image= cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    Image= cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)  # Convert to grayscale
     Image_resized = cv2.resize(Image, (64, 64))
     overlay_base = frame
     transform = transforms.Compose([
@@ -332,21 +348,113 @@ def ProcessVideo(ModelPath, VideoPath, OutputPath='output_video.avi'):
     pbar.close()
     print(f"Processed {frame_count} frames. Output saved to {OutputPath}")
 
+
+def overlay_saliency_on_frame(model, frame, device, face_roi=None):
+    # 1. cut ROI
+    if face_roi is not None:
+        x1, y1, x2, y2 = face_roi
+        roi = frame[y1:y2, x1:x2]
+    else:
+        x1, y1, x2, y2 = 0, 0, frame.shape[1], frame.shape[0]
+        roi = frame
+    #print("roi.shape:", roi.shape)  # <-- ①
+    # 2.  RGB + resize
+    rgb = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
+    img_resized = cv2.resize(rgb, (64, 64))
+    #print("img_resized.shape:", img_resized.shape)  # <-- ②
+
+    # 3. ToTensor + Normalize
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485,0.456,0.406],
+                             std =[0.229,0.224,0.225])
+    ])
+    input_tensor = transform(img_resized).unsqueeze(0).to(device)
+    input_tensor.requires_grad_()
+    #print("input_tensor.shape:", input_tensor.shape)  # <-- ③
+
+    # 4. Forward + backward
+    output = model(input_tensor)
+    pred_idx = int(output.argmax(dim=1))
+    model.zero_grad()
+    output[0, pred_idx].backward()
+
+    grad = input_tensor.grad.abs().squeeze().cpu().numpy()
+    #print("grad.shape:", grad.shape)  # <-- ④
+
+    saliency = np.max(grad, axis=0)
+    #print("saliency.shape:", saliency.shape)  # <-- ⑤
+
+    saliency = (saliency - saliency.min()) / (saliency.max() - saliency.min() + 1e-8)
+    saliency = np.uint8(255 * saliency)
+    saliency = cv2.resize(saliency, (x2-x1, y2-y1))
+
+    heatmap = cv2.applyColorMap(saliency, cv2.COLORMAP_JET)
+    #print("heatmap.shape:", heatmap.shape)  # <-- ⑥
+
+    overlay = frame.copy()
+    #print("frame[y1:y2, x1:x2].shape:", frame[y1:y2, x1:x2].shape)  # <-- ⑦
+    overlay[y1:y2, x1:x2] = cv2.addWeighted(
+        frame[y1:y2, x1:x2], 0.7,
+        heatmap,            0.3,
+        0
+    )
+    # 7.retern overlay、 idx、max_prob
+    probs = torch.softmax(output, dim=1).detach().cpu().numpy()[0]
+    max_prob = float(probs[pred_idx])
+    
+    return overlay, pred_idx, max_prob
+
 # ----------------------
 # 4. Webcam Demo (real-time)
 # ----------------------
+
 def WebcamDemo(ModelPath):
+    #prototxt = ResolvePath('deploy.prototxt')
+    #caffemodel = ResolvePath('res10_300x300_ssd_iter_140000.caffemodel') open in same dir
+    caffemodel = r"E:\githb\PraktikumProjekt\praktikum\res10_300x300_ssd_iter_140000.caffemodel"
+    prototxt = r"E:\githb\PraktikumProjekt\praktikum\deploy.prototxt"
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = EmotionDetectionCNN(EmotionAnzahl=6).to(device)
-    model.load_state_dict(torch.load(ModelPath, map_location=device))
+    model.load_state_dict(torch.load(ModelPath, map_location=device, weights_only=True))
     model.eval()
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(1, cv2.CAP_MSMF)
     print("Press 'q' to quit.")
+    print("Proto exists:", prototxt, os.path.exists(prototxt))
+    print("Model exists:", caffemodel, os.path.exists(caffemodel))
+    net = cv2.dnn.readNetFromCaffe(prototxt, caffemodel)
     while True:
         ret, frame = cap.read()
         if not ret:
             break
-        overlay, pred_idx = overlay_saliency_on_frame(model, frame, device)
+        cv2.imshow("RAW", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+        h, w = frame.shape[:2]
+        blob = cv2.dnn.blobFromImage(frame, 1.0, (300,300),
+                                     (104.0, 177.0, 123.0))
+        net.setInput(blob)
+        detections = net.forward()
+
+        best_conf = 0
+        best_box = None
+        for i in range(detections.shape[2]):
+            conf = float(detections[0,0,i,2])
+            if conf > 0.6 and conf > best_conf:
+                best_conf = conf
+                box = detections[0,0,i,3:7] * np.array([w, h, w, h])
+                best_box = box.astype(int)
+
+        
+        if best_box is not None:
+            x1,y1,x2,y2 = best_box
+          
+            overlay, pred_idx, max_prob = overlay_saliency_on_frame(
+                model, frame, device,
+                face_roi=(x1,y1,x2,y2)  
+            )
+        else:
+            overlay, pred_idx ,max_prob= overlay_saliency_on_frame(model, frame, device)
         label = IndexToEmotion[pred_idx]
         cv2.putText(overlay, f'Prediction: {label}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
         cv2.imshow('Webcam Emotion Recognition', overlay)
@@ -356,23 +464,24 @@ def WebcamDemo(ModelPath):
     cv2.destroyAllWindows()
 #----------------------------------------------------------------------
 # start of implementing interactive mode
-
+   
 if __name__ == '__main__': # only when executed directly not through import
     import argparse
     import sys
    # default paths (examples for user)
-    defaultModelSavePath = 'C:/Users/keysc/Desktop/EmotionCNN/emotion_model.pth'
+    defaultModelSavePath = 'E:/githb/PraktikumProjekt/emotion_model.pth'
     defaultTrainingImagesDir = 'C:/Users/keysc/Desktop/EmotionCNN/archive/train'
     defaultTestImagesDirectory = 'C:/Users/keysc/Desktop/EmotionCNN/archive/test'
  
-    
     if len(sys.argv) == 1: # check if running on an IDE
+
 
         # if yes....
         print("=" * 60)
         print("EMOTION CNN - INTERACTIVE MENU")
         print("=" * 60)
         print("1. Train model from scratch")
+        print("1.5. Train with renet ")
         print("2. Batch classify images in folder to CSV")
         print("3. Process video with emotion classification")
         print("4. Webcam real-time demo")
@@ -420,8 +529,31 @@ if __name__ == '__main__': # only when executed directly not through import
                     print(f"Save path: {savePath}")
 
                     #call function from line "142"
-                    TrainFromScratch(TrainingDirectory, ValidationDirectory, epochs, batch_size, lr, savePath) 
+                    TrainFromScratch(TrainingDirectory, ValidationDirectory, epochs, lr, savePath)
+                elif UserInput == '1.5':
+                    print(f"set model parameters in shape --epoche  --lr --net('resnet50') --device 'cuda'--logroot 'runs'")
                     
+                    epochs     = input("Number of epochs (default 10): ").strip()
+                    epochs     = int(epochs) if epochs else 10
+                    lr         = input("Learning rate (default 0.05): ").strip()
+                    lr         = float(lr) if lr else 0.05
+                    net        = input("Net (resnet50/resnet18, default resnet50): ").strip()
+                    net        = net if net else "resnet50"
+                    device     = input("Device (cuda/cpu, default cuda): ").strip()
+                    device     = device if device else "cuda"
+                    logroot    = input("Logroot (default runs): ").strip()
+                    logroot    = logroot if logroot else "runs"
+                    #  test.py  main
+                    test.main(
+                        epoche=epochs,
+                        #batch_size=64,  # default batch size
+                        lr=lr,
+                        device=device,
+                        logroot=logroot,
+                        net=net
+                    )
+                        
+
                 elif UserInput == '2':
                     print("\n=== BATCH CLASSIFICATION ===")
                     ModelPath = input(f"Model path (default: {defaultModelSavePath}): ").strip()
@@ -466,6 +598,7 @@ if __name__ == '__main__': # only when executed directly not through import
                     
                 print("\n" + "=" * 60)
                 print("1. Train model from scratch")
+                print("1.5. Train with renet")
                 print("2. Batch classify images in folder to CSV")
                 print("3. Process video with emotion classification")
                 print("4. Webcam real-time demo")
