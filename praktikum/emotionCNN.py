@@ -208,9 +208,7 @@ def TrainFromScratch(TrainingDirectory, ValidationDirectory=None, epochs=30, bat
     return model
 
 
-# ----------------------
-# 2. Batch Folder Classification to CSV
-# ----------------------      
+
 def predictToCSV(ModelPath, FolderPath, output_CSV='results.csv', use_data_augmentation=False):
     from tqdm import tqdm
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
