@@ -10,13 +10,16 @@ from torchvision import transforms
 from tqdm import tqdm #progress/loading bars
 import pandas as pd
 import matplotlib.pyplot as plt
-import train_cv
-#from skimage.transform import resize
-#import dlib
+import datetime
 from collections import deque, Counter
+from torch.utils.tensorboard import SummaryWriter
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import test
+#from skimage.transform import resize
+#import dlib
+from collections import deque, Counter
+
 # Emotion labels -- emotionto index and vice versa
 emotions = ['happy', 'surprise', 'sad', 'angry', 'disgust', 'fear']
 EmotionToIndex = {emotion: idx for idx, emotion in enumerate(emotions)}
@@ -140,9 +143,14 @@ class FaceEmotionDataset(Dataset):
         return Image, label
 
 def TrainFromScratch(TrainingDirectory, ValidationDirectory=None, epochs=30, batch_size=64, lr=0.001, savePath='emotion_cnn_scratch.pth'):
+    now     = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    run_na  = f"CNN-lr{lr}-{now}"
+    log_dir = os.path.join('runlog', run_na)
+    os.makedirs(log_dir, exist_ok=True)
+    writer  = SummaryWriter(log_dir=log_dir)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') #gpu else CPU 
     print(f"Using device: {device}")
-    import os
+    #import os
     print(f"Current working directory: {os.getcwd()}")
     
     TrainingDirectory = ResolvePath(TrainingDirectory) # absolute paths so wie oben
@@ -185,18 +193,28 @@ def TrainFromScratch(TrainingDirectory, ValidationDirectory=None, epochs=30, bat
             correct += (preds == labels).sum().item()
             total += labels.size(0)
         trainingAcc = correct / total
+        writer.add_scalar("Loss/train", totalLoss / len(TrainDataLoader), epoch)
+        writer.add_scalar("Accuracy/train", trainingAcc, epoch)
         print(f"Train Loss: {totalLoss/len(TrainDataLoader):.4f}, Train Acc: {trainingAcc:.4f}")
         if ValDataloader:
             model.eval() #evaluation mode 
             valCorrect, valTotal = 0, 0
+            val_batch = 0
+            valTotalLoss = 0
             with torch.no_grad(): # dont track because my goal here is not to train 
                 for Images, labels in ValDataloader: # work in batches 
                     Images, labels = Images.to(device), labels.to(device)
                     outputs = model(Images)
                     _, preds = torch.max(outputs, 1)
                     valCorrect += (preds == labels).sum().item()
+                    valloss = criterion(outputs, labels)
+                    valTotalLoss += valloss.item()
                     valTotal += labels.size(0)
+                    val_batch += 1
             valAcc = valCorrect / valTotal
+            val_loss = valTotalLoss / val_batch
+            writer.add_scalar("Accuracy/Test", valAcc, epoch)
+            writer.add_scalar("Loss/Test", val_loss , epoch)
             print(f"Val Acc: {valAcc:.4f}")
             if valAcc > bestAccuracy:
                 bestAccuracy = valAcc
@@ -208,10 +226,7 @@ def TrainFromScratch(TrainingDirectory, ValidationDirectory=None, epochs=30, bat
     return model
 
 
-# ----------------------
-# 2. Batch Folder Classification to CSV
-# ----------------------      
-def predictToCSV(ModelPath, FolderPath, output_CSV='results.csv', use_data_augmentation=False):
+def predictToCSV(ModelPath, FolderPath, output_CSV='results.csv'):
     from tqdm import tqdm
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     ModelPath = ResolvePath(ModelPath)
@@ -221,27 +236,10 @@ def predictToCSV(ModelPath, FolderPath, output_CSV='results.csv', use_data_augme
     model = EmotionDetectionCNN(EmotionAnzahl=6).to(device)
     model.load_state_dict(torch.load(ModelPath, map_location=device))
     model.eval() #to make sure it's as consestiant as possible 
-    ModelPath = ResolvePath(ModelPath)
-    FolderPath = ResolvePath(FolderPath)
-    print(f"Loading model from: {ModelPath}")
-    print(f"Classifying images in: {FolderPath}")
-    model = EmotionDetectionCNN(EmotionAnzahl=6).to(device)
-    model.load_state_dict(torch.load(ModelPath, map_location=device))
-    model.eval()
-    if use_data_augmentation == True:
-        transforms = transforms.Compose([
-        transforms.RandomResizedCrop(48, scale=(0.8, 1.0)),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomRotation(15),
+    transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
-    else:
-        transforms = transforms.Compose([
-            transforms.Resize(48),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
     results = []
     imageFiles = []
     for root, _, files in os.walk(FolderPath):
@@ -250,11 +248,11 @@ def predictToCSV(ModelPath, FolderPath, output_CSV='results.csv', use_data_augme
                 imageFiles.append(os.path.join(root, ImageFile))
     for ImagePath in tqdm(sorted(imageFiles), desc='Classifying images'):
         Image= cv2.imread(ImagePath)
-        Image= cv2.cvtColor(Image, cv2.COLOR_BGR2RGB)  # Convert to RGB
-        Image= cv2.resize(Image, (64, 64))
-        ImageTensor = transforms(Image).unsqueeze(0).to(device)
+        Image= cv2.cvtColor(Image, cv2.COLOR_BGR2RGB) 
+        Image= cv2.resize(Image, (64, 64)) # das sind ein paar Formalitäten 
+        ImageTensor  = transform(Image).unsqueeze(0).to(device)
         with torch.no_grad():
-            output = model(ImageTensor)
+            output = model(ImageTensor )
             probs = F.softmax(output, dim=1).cpu().numpy()[0] #softmax for probablities
     
         relativePath = os.path.relpath(ImagePath, start=os.getcwd()) # path to current directory
@@ -273,7 +271,6 @@ def predictToCSV(ModelPath, FolderPath, output_CSV='results.csv', use_data_augme
 # ----------------------
 def overlay_saliency_on_frame(model, frame, device):
     # Use the full frame for prediction (no mouth crop)
-    
     Image= cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     Image_resized = cv2.resize(Image, (64, 64))
     overlay_base = frame
@@ -351,7 +348,9 @@ def ProcessVideo(ModelPath, VideoPath, OutputPath='output_video.avi'):
     pbar.close()
     print(f"Processed {frame_count} frames. Output saved to {OutputPath}")
 
-
+# ----------------------
+# 4. Webcam Demo (real-time)
+# ----------------------
 def overlay_saliency_on_frame(model, frame, device, face_roi=None):
     # 1. cut ROI
     if face_roi is not None:
@@ -407,11 +406,6 @@ def overlay_saliency_on_frame(model, frame, device, face_roi=None):
     max_prob = float(probs[pred_idx])
     
     return overlay, pred_idx, max_prob
-
-# ----------------------
-# 4. Webcam Demo (real-time)
-# ----------------------
-
 def WebcamDemo(ModelPath):
     #prototxt = ResolvePath('deploy.prototxt')
     #caffemodel = ResolvePath('res10_300x300_ssd_iter_140000.caffemodel') open in same dir
@@ -467,24 +461,23 @@ def WebcamDemo(ModelPath):
     cv2.destroyAllWindows()
 #----------------------------------------------------------------------
 # start of implementing interactive mode
-   
+
 if __name__ == '__main__': # only when executed directly not through import
     import argparse
     import sys
    # default paths (examples for user)
     defaultModelSavePath = 'E:/githb/PraktikumProjekt/emotion_model.pth'
-    defaultTrainingImagesDir = 'C:/Users/keysc/Desktop/EmotionCNN/archive/train'
-    defaultTestImagesDirectory = 'C:/Users/keysc/Desktop/EmotionCNN/archive/test'
+    defaultTrainingImagesDir = r'E:\githb\PraktikumProjekt\archive\train'
+    defaultTestImagesDirectory = r'E:\githb\PraktikumProjekt\archive\test'
  
+    
     if len(sys.argv) == 1: # check if running on an IDE
-
 
         # if yes....
         print("=" * 60)
         print("EMOTION CNN - INTERACTIVE MENU")
         print("=" * 60)
         print("1. Train model from scratch")
-        print("1.5. Train with renet ")
         print("2. Batch classify images in folder to CSV")
         print("3. Process video with emotion classification")
         print("4. Webcam real-time demo")
@@ -532,7 +525,22 @@ if __name__ == '__main__': # only when executed directly not through import
                     print(f"Save path: {savePath}")
 
                     #call function from line "142"
-                    TrainFromScratch(TrainingDirectory, ValidationDirectory, epochs, lr, savePath)
+                    TrainFromScratch(TrainingDirectory, ValidationDirectory, epochs, batch_size, lr, savePath) 
+                    
+                elif UserInput == '2':
+                    print("\n=== BATCH CLASSIFICATION ===")
+                    ModelPath = input(f"Model path (default: {defaultModelSavePath}): ").strip()
+                    if not ModelPath:
+                        ModelPath = defaultModelSavePath
+                    FolderPath = input(f"Folder path to classify (default: {defaultTestImagesDirectory}): ").strip()
+                    if not FolderPath:
+                        FolderPath = defaultTestImagesDirectory
+                    output_CSV = input("Output CSV filename (default: results.csv): ").strip()
+                    if not output_CSV:
+                        output_CSV = 'results.csv'
+                    
+                    predictToCSV(ModelPath, FolderPath, output_CSV) # label all images and write the results to a CSV
+
                 elif UserInput == '1.5':
                     print(f"set model parameters in shape --epoche  --lr --net('resnet50') --device 'cuda'--logroot 'runs'")
                     
@@ -554,23 +562,7 @@ if __name__ == '__main__': # only when executed directly not through import
                         device=device,
                         logroot=logroot,
                         net=net
-                    )
-                        
-
-                elif UserInput == '2':
-                    print("\n=== BATCH CLASSIFICATION ===")
-                    ModelPath = input(f"Model path (default: {defaultModelSavePath}): ").strip()
-                    if not ModelPath:
-                        ModelPath = defaultModelSavePath
-                    FolderPath = input(f"Folder path to classify (default: {defaultTestImagesDirectory}): ").strip()
-                    if not FolderPath:
-                        FolderPath = defaultTestImagesDirectory
-                    output_CSV = input("Output CSV filename (default: results.csv): ").strip()
-                    if not output_CSV:
-                        output_CSV = 'results.csv'
-                    
-                    predictToCSV(ModelPath, FolderPath, output_CSV) # label all images and write the results to a CSV
-                    
+                    )    
                 elif UserInput == '3':
                     print("\n=== VIDEO PROCESSING ===")
                     ModelPath = input(f"Model path (default: {defaultModelSavePath}): ").strip()
@@ -601,7 +593,6 @@ if __name__ == '__main__': # only when executed directly not through import
                     
                 print("\n" + "=" * 60)
                 print("1. Train model from scratch")
-                print("1.5. Train with renet")
                 print("2. Batch classify images in folder to CSV")
                 print("3. Process video with emotion classification")
                 print("4. Webcam real-time demo")
