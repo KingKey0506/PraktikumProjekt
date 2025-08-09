@@ -16,6 +16,7 @@ from torch.utils.tensorboard import SummaryWriter
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import test
+import result
 #from skimage.transform import resize
 #import dlib
 from collections import deque, Counter
@@ -224,6 +225,9 @@ def TrainFromScratch(TrainingDirectory, ValidationDirectory=None, epochs=30, bat
             torch.save(model.state_dict(), savePath)
     print("Training complete.")
     return model
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 
 
 
@@ -480,6 +484,7 @@ if __name__ == '__main__': # only when executed directly not through import
         print("EMOTION CNN - INTERACTIVE MENU")
         print("=" * 60)
         print("1. Train model from scratch")
+        print("1.5. ResNet Training & Webcam Options")
         print("2. Batch classify images in folder to CSV")
         print("3. Process video with emotion classification")
         print("4. Webcam real-time demo")
@@ -544,27 +549,158 @@ if __name__ == '__main__': # only when executed directly not through import
                     predictToCSV(ModelPath, FolderPath, output_CSV) # label all images and write the results to a CSV
 
                 elif UserInput == '1.5':
-                    print(f"set model parameters in shape --epoche  --lr --net('resnet50') --device 'cuda'--logroot 'runs'")
+                    print("\n=== RESNET TRAINING & WEBCAM OPTIONS ===")
+                    print("\n--- Common Path Settings ---")
+                    weight_path = input("Enter weight path (default: weights/model_net50_lr0.025.pth): ").strip()
+                    weight_path = weight_path if weight_path else 'weights/model_net50_lr0.025.pth'
                     
-                    epochs     = input("Number of epochs (default 10): ").strip()
-                    epochs     = int(epochs) if epochs else 10
-                    lr         = input("Learning rate (default 0.05): ").strip()
-                    lr         = float(lr) if lr else 0.05
-                    net        = input("Net (resnet50/resnet18, default resnet50): ").strip()
-                    net        = net if net else "resnet50"
-                    device     = input("Device (cuda/cpu, default cuda): ").strip()
-                    device     = device if device else "cuda"
-                    logroot    = input("Logroot (default runs): ").strip()
-                    logroot    = logroot if logroot else "runs"
-                    #  test.py  main
-                    test.main(
-                        epoche=epochs,
-                        #batch_size=64,  # default batch size
-                        lr=lr,
-                        device=device,
-                        logroot=logroot,
-                        net=net
-                    )    
+                    csv_path = input("Enter CSV path (default: resnet/fer2013.csv): ").strip()
+                    csv_path = csv_path if csv_path else 'resnet/fer2013.csv'
+                    
+                    print(f"Weight path set to: {weight_path}")
+                    print(f"CSV path set to: {csv_path}")
+                    print(f"Weight file exists: {os.path.exists(weight_path)}")
+                    print(f"CSV file exists: {os.path.exists(csv_path)}")
+                    
+                    print("\nAvailable options:")
+                    print("webcam - Webcam testing with existing model")
+                    print("train - Train ResNet model")
+                    print("atten - Attention heatmap visualization")
+                    print("confusion - Generate confusion matrix")
+                    
+                    sub_choice = input("Choose option (webcam/train/atten/confusion): ").strip()
+                    
+                    if sub_choice == 'webcam':
+                        print("\n=== WEBCAM TEST ===")
+                        print("This will test webcam input format and emotion detection.")
+                        print("Press 'q' in the webcam window to quit the test.")
+                        print(f"Using model: {weight_path}")
+                        
+                
+                        script_dir = os.path.dirname(os.path.abspath(__file__))
+                        project_root = os.path.dirname(script_dir)
+                        
+                        if not os.path.isabs(weight_path):
+                            
+                            full_weight_path = os.path.join(script_dir, weight_path)
+                            if not os.path.exists(full_weight_path):
+                                
+                                full_weight_path = os.path.join(project_root, weight_path)
+                        else:
+                            full_weight_path = weight_path
+                        
+                        print(f"Resolved model path: {full_weight_path}")
+                        print(f"Model exists: {os.path.exists(full_weight_path)}")
+                        
+                        if os.path.exists(full_weight_path):
+                            try:
+                                result.WebcamDemo(full_weight_path)
+                            except Exception as e:
+                                print(f"Webcam test failed: {e}")
+                        else:
+                            print(f"Model path not found: {full_weight_path}")
+                            print("Please check the path.")
+                            
+                    elif sub_choice == 'atten':
+                        print("\n=== ATTENTION HEATMAP VISUALIZATION ===")
+                        print(f"Using weight path: {weight_path}")
+                        print(f"Using CSV path: {csv_path}")
+                        
+                        n_samples = input("Number of samples (default 7): ").strip()
+                        n_samples = int(n_samples) if n_samples else 7
+                        
+                       
+                        try:
+                            result.batch_attention_vis(weight_path, csv_path, device='cuda', n_samples=n_samples)
+                        except Exception as e:
+                            print(f"Attention visualization failed: {e}")
+                            print("Please check if the paths are correct and files exist.")
+                            
+                    elif sub_choice == 'confusion':
+                        print("\n=== CONFUSION MATRIX ===")
+                        print(f"Using weight path: {weight_path}")
+                        print(f"Using CSV path: {csv_path}")
+                        
+                        save_path = input("Enter save path for confusion matrix (default: confusion_matrix.png): ").strip()
+                        save_path = save_path if save_path else 'confusion_matrix.png'
+                        net_type = input("Network type (default: net50): ").strip()
+                        net_type = net_type if net_type else 'net50'
+                        max_samples = input("Max samples (default: 1000 for quick test): ").strip()
+                        max_samples = int(max_samples) if max_samples.isdigit() else 1000
+                        
+        
+                        try:
+                            print(f"Starting confusion matrix evaluation with:")
+                            print(f"Weight path: {weight_path}")
+                            print(f"CSV path: {csv_path}")
+                            print(f"Network type: {net_type}")
+                            print(f"Max samples: {max_samples}")
+                            print(f"Save path: {save_path}")
+                            
+                            result.evaluate_confusion_matrix(
+                                weight_path=weight_path,
+                                csv_path=csv_path,
+                                network_type=net_type,
+                                device='cuda:0',
+                                save_path=save_path,
+                                max_samples=max_samples
+                            )
+                        except Exception as e:
+                            print(f"Confusion matrix evaluation failed: {e}")
+                            print("Please check if the paths are correct and files exist.")
+                            
+                    elif sub_choice == 'train':
+                        print("\n=== RESNET TRAINING ===")
+                        print(f"Using CSV path for training data: {csv_path}")
+                        print(f"Set model parameters in shape --epoche --lr --net('net50') --device 'cuda' --logroot 'runs'")
+                        
+                        epochs     = input("Number of epochs (default 10): ").strip()
+                        epochs     = int(epochs) if epochs else 10
+                        batch_size = input("Batch size (default 64): ").strip() 
+                        batch_size = int(batch_size) if batch_size else 64
+                        lr         = input("Learning rate (default 0.05): ").strip()
+                        lr         = float(lr) if lr else 0.05
+                        net        = input("Net (net50/net18, default net50): ").strip()
+                        net        = net if net else "net50"
+                        device     = input("Device (cuda/cpu, default cuda): ").strip()
+                        device     = device if device else "cuda"
+                        logroot    = input("Logroot (default runs): ").strip()
+                        logroot    = logroot if logroot else "runs"
+                        reshape    = input("Reshape size (default 224): ").strip()
+                        reshape    = int(reshape) if reshape else 224
+                        
+                        print(f"\nStarting ResNet training with:")
+                        print(f"Epochs: {epochs}")
+                        print(f"Batch size: {batch_size}")
+                        print(f"Learning rate: {lr}")
+                        print(f"Network: {net}")
+                        print(f"Device: {device}")
+                        print(f"Data path: {csv_path}")
+                        print(f"Reshape: {reshape}")
+                        print(f"Log root: {logroot}")
+                        
+                        print("\n=== STARTING TRAINING ===")
+                        
+                        if os.path.exists(csv_path):
+                            try:
+                                test.main(
+                                    epoche=epochs,
+                                    batch_size=batch_size,
+                                    lr=lr,
+                                    device=device,
+                                    logroot=logroot,
+                                    net=net,
+                                    data_path=csv_path,
+                                    reshape=reshape
+                                )
+                            except Exception as e:
+                                print(f"Training failed: {e}")
+                        else:
+                            print(f"CSV file not found: {csv_path}")
+                            print("Please check the path.")
+                    
+                    else:
+                        print("Invalid choice. Please enter webcam/train/atten/confusion.")    
                 elif UserInput == '3':
                     print("\n=== VIDEO PROCESSING ===")
                     ModelPath = input(f"Model path (default: {defaultModelSavePath}): ").strip()
@@ -595,6 +731,7 @@ if __name__ == '__main__': # only when executed directly not through import
                     
                 print("\n" + "=" * 60)
                 print("1. Train model from scratch")
+                print("1.5. ResNet Training & Result Options")
                 print("2. Batch classify images in folder to CSV")
                 print("3. Process video with emotion classification")
                 print("4. Webcam real-time demo")

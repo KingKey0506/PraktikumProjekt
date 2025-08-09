@@ -18,7 +18,7 @@ b2 = n.Sequential(*res50.res_net(64, 64, 2, havefirst=True))
 b3 = n.Sequential(*res50.res_net(64, 128, 2 ,havefirst=False))
 b4 = n.Sequential(*res50.res_net(128, 256, 2, havefirst=False))
 b5 = n.Sequential(*res50.res_net(256, 512, 2, havefirst=False))
-net = n.Sequential(b1, b2, b3, b4, b5,n.AdaptiveAvgPool2d((1,1)), n.Flatten(),n.Linear(512, 7))#linnear 7 emotion type
+net18 = n.Sequential(b1, b2, b3, b4, b5,n.AdaptiveAvgPool2d((1,1)), n.Flatten(),n.Linear(512, 7))#linnear 7 emotion type
 
 
 '''resnet50'''
@@ -30,12 +30,22 @@ b4 = n.Sequential(*res50.resnet50(512, 256, 6,first_stride=2))
 b5 = n.Sequential(*res50.resnet50(1024, 512, 3,first_stride=2))
 net50 = n.Sequential(b1, b2, b3, b4, b5,n.AdaptiveAvgPool2d((1,1)), n.Flatten(),n.Dropout(0.5),n.Linear(2048, 7))# add
 '''train'''
-def train (net, train_it, test_it, num_epoche, lernrat, device ,writer):
+def train (net, train_it, test_it, num_epoche, lernrat, device ,writer, savePath):
     
     def init_weight (mo):
         if type(mo) == n.Linear or type(mo) == n.Conv2d:
             n.init.xavier_uniform_(mo.weight)
-    device = torch.device(device if torch.cuda.is_available() else "cpu")
+    
+    # Handle device specification (cuda:0, cuda:1, etc.)
+    if isinstance(device, str) and device.startswith('cuda'):
+        if torch.cuda.is_available():
+            device = torch.device(device)
+        else:
+            device = torch.device('cpu')
+            print("CUDA not available, falling back to CPU")
+    else:
+        device = torch.device(device if torch.cuda.is_available() else "cpu")
+    
     print('train on',device)
     net.to(device)
     #optimiz = torch.optim.SGD(net.parameters(), lr=lernrat,  momentum=0.9)
@@ -78,6 +88,10 @@ def train (net, train_it, test_it, num_epoche, lernrat, device ,writer):
         writer.add_scalar('Accuracy/test', acc, epoche)
         writer.add_scalar('Loss/test', acc_los, epoche)
         writer.flush()
+        if acc > bestAccuracy:
+            bestAccuracy = acc
+            torch.save(net.state_dict(), savePath)
+            print(f"Model saved to {savePath}")
         if epoche < 5:
             warmup.step()
             print(f"Epoch {epoche}: lr = {scheduler.get_last_lr()[0]:.3e}")

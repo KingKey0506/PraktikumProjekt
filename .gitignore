@@ -59,3 +59,5 @@ labels.npy
 # Model files (optional - remove if you want to include trained models)
 emotion_model.pth 
 fer2013.csv
+runs
+runlog
